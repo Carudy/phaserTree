@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import random
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, accuracy_score
 
 DATA_PATH = Path('D://dataset')
 
@@ -20,7 +20,7 @@ def read_libsvm(dname):
     if (DATA_PATH / f'{dname}.txt').exists():
         xs, ys = load_svmlight_file(str((DATA_PATH / f'{dname}.txt')))
         pt = 0.2 if dname != 'iris' else 0.1
-        xs, xs_t, ys, ys_t = train_test_split(xs.toarray(), ys, train_size=0.2)
+        xs, xs_t, ys, ys_t = train_test_split(xs.toarray(), ys, test_size=0.2)
         return xs, ys, xs_t, ys_t
     else:
         dir = DATA_PATH / dname
@@ -31,16 +31,26 @@ def read_libsvm(dname):
 
 class OPE:
     def __init__(self):
-        self.a = random.randint(1, 1<<16)
-        self.b = random.randint(1, 1<<16)
-        self.c = random.randint(1, 1<<16)
+        self.a = random.randint(1, 1<<2)
+        self.b = random.randint(1, 1<<2)
+        self.c = random.randint(1, 1<<2)
 
     def __call__(self, x):
-        # res = self.a * (x - self.c) ** 2 + self.b
-        # if x >= self.c:
-        #     return res
-        # return 2 * self.b - res
-        return 1.5 * x + 2
+        res = self.a * (x - self.c) ** 2 + self.b
+        if x >= self.c:
+            return res
+        return 2 * self.b - res
+        # return 1.5 * x + 2
+
+
+class mOPE:
+    def __init__(self, arr):
+        self.arr = sorted(arr)
+        self.dict = {i: j for j, i in enumerate(self.arr)}
+
+    def __call__(self, x):
+        return self.dict[x]
+
 
 class Phaser:
     def __init__(self, arr, p):
@@ -69,14 +79,18 @@ def trans_phase(ds, i):
     for x in ds[2]:
         x[i] = pa(x[i])
 
-def trans_ope(ds):
+def trans_ope(ds, mope=False):
     nf = len(ds[0][0])
-    ope = OPE()
-    for x in ds[0]:
-        for i in range(nf):
+    for i in range(nf):
+        if mope:
+            _arr1 = [j[i] for j in ds[0]]
+            _arr2 = [j[i] for j in ds[2]]
+            ope = mOPE(_arr1+_arr2)
+        else:
+            ope = OPE()
+        for x in ds[0]:
             x[i] = ope(x[i])
-    for x in ds[2]:
-        for i in range(nf):
+        for x in ds[2]:
             x[i] = ope(x[i])
 
 def test_md_ds(md, ds):
@@ -90,7 +104,7 @@ def test_md_ds(md, ds):
         clf = cgb(verbose=False)
         clf.fit(ds[0], ds[1])
     elif md==efdt:
-        print('IDT')
+        print('EFDT')
         clf = md(min_samples_reevaluate=1000)
         clf.fit(ds[0], ds[1])
     else:
@@ -100,13 +114,15 @@ def test_md_ds(md, ds):
     if len(ds) == 2:
         # res = clf.score(ds[0], ds[1])
         pred = clf.predict(ds[0])
-        res = roc_auc_score(ds[1], pred)
-        print(f'{res:.3f}')
+        res = accuracy_score(ds[1], pred)
+        # res = roc_auc_score(ds[1], pred)
+        print(f'{res*100:.3f}')
     else:
-        # res = clf.score(ds[2], ds[3])
         pred = clf.predict(ds[2])
-        res = roc_auc_score(ds[3], pred)
-        print(f'{res:.3f}')
+        # res = clf.score(ds[2], ds[3])
+        res = accuracy_score(ds[3], pred)
+        # res = roc_auc_score(ds[3], pred)
+        print(f'{res*100:.3f}')
     return res
 
 def evalate(md, ds):
