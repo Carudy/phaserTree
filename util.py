@@ -13,8 +13,11 @@ import numpy as np
 import random
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, accuracy_score
+from scipy.interpolate import PchipInterpolator
+
 
 DATA_PATH = Path('D://dataset')
+
 
 def read_libsvm(dname):
     if (DATA_PATH / f'{dname}.txt').exists():
@@ -27,13 +30,13 @@ def read_libsvm(dname):
         xs, ys = load_svmlight_file(str(dir / f'{dname}.txt'))
         xs_t, ys_t = load_svmlight_file(str(dir / f'{dname}.t'))
         return xs.toarray(), ys, xs_t.toarray(), ys_t
-    
+
 
 class OPE:
     def __init__(self):
-        self.a = random.randint(1, 1<<2)
-        self.b = random.randint(1, 1<<2)
-        self.c = random.randint(1, 1<<2)
+        self.a = random.randint(1, 1 << 2)
+        self.b = random.randint(1, 1 << 2)
+        self.c = random.randint(1, 1 << 2)
 
     def __call__(self, x):
         res = self.a * (x - self.c) ** 2 + self.b
@@ -69,15 +72,49 @@ class Phaser:
         else:
             return x
 
-def trans_phase(ds, i):
-    A = [x[i] for x in ds[0]]
-    r = random.random() * 0.4 + 0.4
-    # r = 0.8
-    pa = Phaser(A, (max(A)-min(A)) * r)
-    for x in ds[0]:
-        x[i] = pa(x[i])
-    for x in ds[2]:
-        x[i] = pa(x[i])
+
+class SplinePhaser:
+    def __init__(self, arr, n):
+        if len(arr) <= 1:
+            self.spline = lambda x: x
+            return
+        mi = min(arr)
+        ma = max(arr)
+        p = (ma-mi) / n
+        l = mi
+        sm = 1e-6
+        xs = []
+        ys = []
+        pieces = []
+        for i in range(n):
+            r = l + p
+            pieces.append((l, r))
+            l = r
+        to_pieces = pieces[:]
+        random.seed(n)
+        while to_pieces == pieces:
+            random.shuffle(to_pieces)
+        for i in range(n):
+            xs.append(pieces[i][0] + sm)
+            xs.append(pieces[i][1])
+            ys.append(to_pieces[i][0])
+            ys.append(to_pieces[i][1])
+        self.spline = PchipInterpolator(xs, ys)
+
+    def __call__(self, x):
+        return self.spline(x)
+
+
+def trans_phase(ds):
+    nf = len(ds[0][0])
+    for i in range(nf):
+        A = [x[i] for x in ds[0]]
+        pa = SplinePhaser(list(set(A)), 2)
+        for x in ds[0]:
+            x[i] = pa(x[i])
+        for x in ds[2]:
+            x[i] = pa(x[i])
+
 
 def trans_ope(ds, mope=False):
     nf = len(ds[0][0])
@@ -93,6 +130,7 @@ def trans_ope(ds, mope=False):
         for x in ds[2]:
             x[i] = ope(x[i])
 
+
 def test_md_ds(md, ds):
     if md == xgb:
         clf = xgb.XGBRegressor(tree_method="gpu_hist")
@@ -100,17 +138,17 @@ def test_md_ds(md, ds):
     elif md == lgb:
         clf = lgb()
         clf.fit(ds[0], ds[1])
-    elif md==cgb:
+    elif md == cgb:
         clf = cgb(verbose=False)
         clf.fit(ds[0], ds[1])
-    elif md==efdt:
+    elif md == efdt:
         print('EFDT')
         clf = md(min_samples_reevaluate=1000)
         clf.fit(ds[0], ds[1])
     else:
         clf = md()
         clf.fit(ds[0], ds[1])
-        
+
     if len(ds) == 2:
         # res = clf.score(ds[0], ds[1])
         pred = clf.predict(ds[0])
@@ -125,19 +163,18 @@ def test_md_ds(md, ds):
         print(f'{res*100:.3f}')
     return res
 
+
 def evalate(md, ds):
     ds = read_libsvm(ds)
     print('Vanilla:', end=' ')
     ori = test_md_ds(md, ds)
 
-    nf = len(ds[0][0])
-    for i in range(nf):
-        trans_phase(ds, i)
-    trans_ope(ds)
+    trans_phase(ds)
 
     print('ENC:', end=' ')
     now = test_md_ds(md, ds)
     # print(f'error: {100*(now-ori):.3f}')
+
 
 def evalate_all(md, dss=['iris', 'mushrooms', 'cod-rna', 'covtype', 'sensorless', 'heart', 'dna', 'madelon']):
     for ds in dss:
