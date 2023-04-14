@@ -14,9 +14,57 @@ import random
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, accuracy_score
 from scipy.interpolate import PchipInterpolator
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder
+
+import math
 
 
 DATA_PATH = Path('D://dataset')
+
+
+def uci_preprocess(dname, original_train, original_test):
+    num_train = len(original_train)
+    original = pd.concat([original_train, original_test])
+
+    if dname == 'adult':
+        labels = original.iloc[:, -1]
+        labels = labels.replace('<=50K', 0).replace('>50K', 1)
+        labels = labels.replace('<=50K.', 0).replace('>50K.', 1)
+        labels = labels.to_numpy()
+        del original[3]
+        del original[14]
+
+    else:
+        labels = original.iloc[:, -1]
+        le = LabelEncoder()
+        labels = le.fit_transform(labels)
+        del original[original.columns[-1]]
+
+    data = pd.get_dummies(original)
+    train_data = data[:num_train]
+    train_labels = labels[:num_train]
+    test_data = data[num_train:]
+    test_labels = labels[num_train:]
+
+    return train_data.to_numpy(), train_labels, test_data.to_numpy(), test_labels
+
+
+def read_uci(dname):
+    dir = DATA_PATH / dname
+    original_train = pd.read_csv(str(
+        dir / f'{dname}.data'), sep=r'\s*,\s*|;', engine='python', na_values="?", header=None)
+
+    try:
+        original_test = pd.read_csv(str(
+            dir / f'{dname}.test'), sep=r'\s*,\s*|;', engine='python', na_values="?", skiprows=1, header=None)
+    except:
+        n = len(original_train)
+        nt = int(n*0.8)
+        original_test = original_train[nt:]
+        original_train = original_train[:nt]
+
+    return uci_preprocess(dname, original_train, original_test)
 
 
 def read_libsvm(dname):
@@ -30,6 +78,12 @@ def read_libsvm(dname):
         xs, ys = load_svmlight_file(str(dir / f'{dname}.txt'))
         xs_t, ys_t = load_svmlight_file(str(dir / f'{dname}.t'))
         return xs.toarray(), ys, xs_t.toarray(), ys_t
+
+
+def auto_read_dataset(dname):
+    if dname in ['adult', 'bank', 'credit', 'higgs', 'nomao']:
+        return read_uci(dname)
+    return read_libsvm(dname)
 
 
 class OPE:
@@ -80,6 +134,15 @@ class SplinePhaser:
             return
         mi = min(arr)
         ma = max(arr)
+        if not math.isfinite(mi) or not math.isfinite(ma):
+            self.spline = lambda x: x
+            return 
+        
+        r = ma - mi
+        a = random.random() * 0.4 + 0.1
+        margin = a * r
+        mi, ma = mi - margin, ma + margin
+
         p = (ma-mi) / n
         l = mi
         sm = 1e-6
@@ -105,11 +168,21 @@ class SplinePhaser:
         return self.spline(x)
 
 
-def trans_phase(ds):
+def trans_phase_single(ds, i):
+    nf = len(ds[0][0])
+    A = [x[i] for x in ds[0]]
+    pa = SplinePhaser(list(set(A)), 2)
+    for x in ds[0]:
+        x[i] = pa(x[i])
+    for x in ds[2]:
+        x[i] = pa(x[i])
+
+
+def trans_phase(ds, n=2):
     nf = len(ds[0][0])
     for i in range(nf):
         A = [x[i] for x in ds[0]]
-        pa = SplinePhaser(list(set(A)), 2)
+        pa = SplinePhaser(list(set(A)), n=n)
         for x in ds[0]:
             x[i] = pa(x[i])
         for x in ds[2]:
@@ -164,20 +237,24 @@ def test_md_ds(md, ds):
     return res
 
 
-def evalate(md, ds):
-    ds = read_libsvm(ds)
-    print('Vanilla:', end=' ')
-    ori = test_md_ds(md, ds)
+def evalate(md, ds, only_enc=False, n_piece=2):
+    ds = auto_read_dataset(ds)
+    if not only_enc:
+        print('Vanilla:', end=' ')
+        ori = test_md_ds(md, ds)
+    else:
+        ori = 0
 
-    trans_phase(ds)
+    trans_phase(ds, n=n_piece)
 
     print('ENC:', end=' ')
     now = test_md_ds(md, ds)
+    return (ori, now)
     # print(f'error: {100*(now-ori):.3f}')
 
 
-def evalate_all(md, dss=['iris', 'mushrooms', 'cod-rna', 'covtype', 'sensorless', 'heart', 'dna', 'madelon']):
+def evalate_all(md, dss=['iris', 'mushrooms', 'cod-rna', 'covtype', 'sensorless', 'heart', 'dna', 'madelon'], n_piece=2):
     for ds in dss:
         print(ds)
-        evalate(md, ds)
+        evalate(md, ds, n_piece)
         print('')
