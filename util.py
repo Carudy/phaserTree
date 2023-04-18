@@ -163,6 +163,7 @@ class SplinePhaser:
             ys.append(to_pieces[i][0])
             ys.append(to_pieces[i][1])
         self.spline = PchipInterpolator(xs, ys)
+        self.pieces = pieces[:]
 
     def __call__(self, x):
         return self.spline(x)
@@ -204,7 +205,7 @@ def trans_ope(ds, mope=False):
             x[i] = ope(x[i])
 
 
-def test_md_ds(md, ds):
+def test_md_ds(md, ds, shit=True):
     if md == xgb:
         clf = xgb.XGBRegressor(tree_method="gpu_hist")
         clf.fit(ds[0], ds[1])
@@ -221,6 +222,9 @@ def test_md_ds(md, ds):
     else:
         clf = md()
         clf.fit(ds[0], ds[1])
+
+    if shit:
+        print(f'(depth: {clf.get_depth()})', end=' ')
 
     if len(ds) == 2:
         # res = clf.score(ds[0], ds[1])
@@ -256,5 +260,5 @@ def evalate(md, ds, only_enc=False, n_piece=2):
 def evalate_all(md, dss=['iris', 'mushrooms', 'cod-rna', 'covtype', 'sensorless', 'heart', 'dna', 'madelon'], n_piece=2):
     for ds in dss:
         print(ds)
-        evalate(md, ds, n_piece)
+        evalate(md, ds, n_piece=n_piece)
         print('')
